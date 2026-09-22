@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>อัปโหลดขึ้นจอ</title>
+<style>
+  :root{--bg:#0f1216;--surface:#171b22;--border:#2a313c;--text:#e8ecf1;--muted:#9aa4b2;--accent:#6c8cff;--green:#2ecc71;--red:#e74c3c;}
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;padding:20px;max-width:480px;margin:0 auto;min-height:100vh;}
+  h1{font-size:22px;margin-bottom:4px;}
+  .muted{color:var(--muted);font-size:14px;margin-bottom:20px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px;}
+  .drop{border:2px dashed var(--border);border-radius:14px;padding:34px 16px;text-align:center;color:var(--muted);cursor:pointer;}
+  .drop .ic{font-size:44px;}
+  input[type=file]{display:none;}
+  .btn{border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:600;cursor:pointer;width:100%;background:var(--accent);color:#fff;margin-top:8px;}
+  .chk{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:14px;color:var(--muted);}
+  .chk input{width:20px;height:20px;}
+  #prog{height:10px;background:#0b0e12;border-radius:6px;overflow:hidden;margin-top:16px;display:none;}
+  #bar{height:100%;width:0;background:var(--green);transition:width .2s;}
+  #done{display:none;text-align:center;padding:30px 10px;}
+  #done .ic{font-size:60px;}
+  .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+  .thumbs img,.thumbs .v{width:64px;height:64px;object-fit:cover;border-radius:8px;background:#000;display:flex;align-items:center;justify-content:center;font-size:26px;}
+</style>
+</head>
+<body>
+<h1>📤 อัปโหลดขึ้นจอ</h1>
+<div class="muted">เลือกรูปหรือวิดิโอจากเครื่อง แล้วส่งเข้าคลังสื่อของจอ</div>
+
+<div class="card" id="form">
+  <label class="drop" for="f">
+    <div class="ic">🖼️</div>
+    <div style="margin-top:8px">แตะเพื่อเลือกรูป / วิดิโอ<br>หรือถ่ายใหม่</div>
+  </label>
+  <input id="f" type="file" accept="image/*,video/*" multiple>
+  <div class="thumbs" id="thumbs"></div>
+  <label class="chk"><input type="checkbox" id="playNow"> ฉายขึ้นจอทันทีหลังอัป (รูปแรก)</label>
+  <button class="btn" id="send">อัปโหลด</button>
+  <div id="prog"><div id="bar"></div></div>
+</div>
+
+<div class="card" id="done">
+  <div class="ic">✅</div>
+  <div style="font-size:18px;font-weight:600;margin-top:8px">อัปโหลดสำเร็จ!</div>
+  <div class="muted" style="margin-top:6px" id="doneMsg"></div>
+  <button class="btn" onclick="location.reload()">อัปอีกไฟล์</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+const CFG = window.SIGNAGE_CONFIG||{};
+const DISPLAY_ID = new URLSearchParams(location.search).get('id')||CFG.DISPLAY_ID||'screen1';
+const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
+let files=[];
+const fInput=document.getElementById('f');
+fInput.addEventListener('change',()=>{
+  files=[...fInput.files];
+  const t=document.getElementById('thumbs'); t.innerHTML='';
+  files.forEach(file=>{
+    if(file.type.startsWith('image')){ const img=document.createElement('img'); img.src=URL.createObjectURL(file); t.appendChild(img); }
+    else { const d=document.createElement('div'); d.className='v'; d.textContent='🎬'; t.appendChild(d); }
+  });
+});
+function up(path,file,onP){
+  return new Promise((res,rej)=>{
+    const x=new XMLHttpRequest();
+    x.open('POST',CFG.SUPABASE_URL+'/storage/v1/object/media/'+encodeURIComponent(path));
+    x.setRequestHeader('Authorization','Bearer '+CFG.SUPABASE_KEY);
+    x.setRequestHeader('apikey',CFG.SUPABASE_KEY);
+    x.setRequestHeader('x-upsert','true');
+    if(file.type) x.setRequestHeader('Content-Type',file.type);
+    x.upload.onprogress=e=>{ if(e.lengthComputable&&onP) onP(e.loaded/e.total); };
+    x.onload=()=> (x.status>=200&&x.status<300)?res():rej(new Error('HTTP '+x.status));
+    x.onerror=()=>rej(new Error('net'));
+    x.send(file);
+  });
+}
+document.getElementById('send').addEventListener('click',async()=>{
+  if(!files.length){ alert('เลือกไฟล์ก่อน'); return; }
+  const prog=document.getElementById('prog'),bar=document.getElementById('bar');
+  prog.style.display='block';
+  let firstImageUrl=null;
+  for(let i=0;i<files.length;i++){
+    const file=files[i];
+    const kind=file.type.startsWith('video')?'video':'image';
+    const safe=file.name.replace(/[^\w.\-]+/g,'_');
+    const path=Date.now()+'_'+i+'_'+safe;
+    try{
+      await up(path,file,p=>bar.style.width=Math.round(((i+p)/files.length)*100)+'%');
+      const url=CFG.SUPABASE_URL+'/storage/v1/object/public/media/'+encodeURIComponent(path);
+      await sb.from('media').insert({kind,name:file.name,url,storage_path:path});
+      if(kind==='image'&&!firstImageUrl) firstImageUrl=url;
+    }catch(e){ alert('อัปโหลดล้มเหลว: '+file.name); }
+  }
+  if(document.getElementById('playNow').checked && firstImageUrl){
+    await sb.from('displays').update({mode:'image',content:{url:firstImageUrl},screen:'on'}).eq('id',DISPLAY_ID);
+  }
+  document.getElementById('form').style.display='none';
+  document.getElementById('done').style.display='block';
+  document.getElementById('doneMsg').textContent=files.length+' ไฟล์เข้าคลังแล้ว';
+});
+</script>
+</body>
+</html>
