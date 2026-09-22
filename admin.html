@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แผงควบคุมจอ</title>
+<style>
+  :root{
+    --bg:#0f1216; --surface:#171b22; --surface2:#1f242d; --border:#2a313c;
+    --text:#e8ecf1; --muted:#9aa4b2; --accent:#6c8cff; --accent2:#8a6cff;
+    --green:#2ecc71; --red:#e74c3c; --yellow:#f1c40f;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,'Segoe UI',sans-serif;padding:14px;padding-bottom:60px;max-width:760px;margin:0 auto;}
+  h1{font-size:20px;margin-bottom:2px;}
+  .subtitle{color:var(--muted);font-size:13px;margin-bottom:14px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px;}
+  .card h2{font-size:15px;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;}
+  .btn{border:0;border-radius:10px;padding:11px 14px;font-size:14px;font-weight:600;cursor:pointer;color:#fff;background:var(--surface2);border:1px solid var(--border);color:var(--text);flex:1;min-width:90px;text-align:center;transition:transform .05s;}
+  .btn:active{transform:scale(.97);}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn.violet{background:var(--accent2);border-color:var(--accent2);color:#fff;}
+  .btn.green{background:var(--green);border-color:var(--green);color:#04210f;}
+  .btn.red{background:var(--red);border-color:var(--red);color:#fff;}
+  .btn.sm{padding:7px 10px;font-size:13px;flex:none;min-width:auto;}
+  input,select{background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:10px;font-size:14px;width:100%;}
+  label{font-size:13px;color:var(--muted);display:block;margin:8px 0 4px;}
+  .status-pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:4px 10px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--red);}
+  .dot.on{background:var(--green);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;}
+  .tile{background:var(--surface2);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;}
+  .thumb{aspect-ratio:16/10;background:#000 center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:34px;color:#4a5563;position:relative;}
+  .thumb .badge{position:absolute;top:6px;left:6px;font-size:10px;background:rgba(0,0,0,.6);padding:2px 6px;border-radius:6px;color:#fff;}
+  .tile .meta{padding:7px 8px;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .tile .acts{display:flex;gap:5px;padding:0 8px 8px;}
+  .tile .acts .btn{flex:1;padding:7px;font-size:12px;}
+  .sel{outline:3px solid var(--accent);outline-offset:-3px;}
+  .muted{color:var(--muted);font-size:12px;}
+  #progWrap{height:8px;background:var(--surface2);border-radius:6px;overflow:hidden;margin-top:8px;display:none;}
+  #progBar{height:100%;width:0;background:var(--accent);transition:width .2s;}
+  .qrbox{display:flex;gap:16px;flex-wrap:wrap;}
+  .qrbox .q{text-align:center;font-size:12px;color:var(--muted);}
+  .qrbox canvas{background:#fff;border-radius:8px;padding:6px;}
+  /* pin gate */
+  #gate{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:100;padding:20px;}
+  #gate .box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:300px;text-align:center;}
+  #gate input{text-align:center;font-size:22px;letter-spacing:6px;margin:14px 0;}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#000;border:1px solid var(--border);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:200;opacity:0;transition:opacity .25s;pointer-events:none;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <div style="font-size:34px">🔒</div>
+    <div style="margin-top:8px;font-weight:600">ใส่ PIN เพื่อเข้าใช้งาน</div>
+    <input id="pinInput" type="tel" inputmode="numeric" placeholder="••••" maxlength="8">
+    <button class="btn primary" style="width:100%" onclick="checkPin()">เข้าสู่ระบบ</button>
+    <div id="pinErr" style="color:var(--red);font-size:13px;margin-top:8px;min-height:16px"></div>
+  </div>
+</div>
+
+<h1>📺 แผงควบคุมจอ</h1>
+<div class="subtitle" id="subtitle">Signage Display</div>
+
+<!-- STATUS + QUICK CONTROL -->
+<div class="card">
+  <h2>สถานะ &amp; ควบคุมด่วน</h2>
+  <div class="row" style="align-items:center;margin-bottom:10px">
+    <span class="status-pill"><span class="dot" id="onlineDot"></span><span id="onlineText">กำลังเช็ก…</span></span>
+    <span class="status-pill" id="modePill">โหมด: -</span>
+  </div>
+  <div class="row">
+    <button class="btn green" onclick="cmd({screen:'on'})">🔆 เปิดจอ</button>
+    <button class="btn" onclick="cmd({screen:'off'})">🌙 ปิดจอ (ดำ)</button>
+    <button class="btn" onclick="cmd({mode:'idle',content:{}})">⏹ หยุด/นาฬิกา</button>
+    <button class="btn" onclick="reloadDisplays()">🔄 รีเฟรช</button>
+  </div>
+</div>
+
+<!-- UPLOAD -->
+<div class="card">
+  <h2>⬆️ อัปโหลดรูป / วิดิโอ</h2>
+  <input id="fileInput" type="file" accept="image/*,video/*" multiple>
+  <div id="progWrap"><div id="progBar"></div></div>
+  <div class="muted" id="uploadHint" style="margin-top:8px">เลือกได้หลายไฟล์ · รูปภาพและวิดิโอ (สูงสุด 500MB/ไฟล์)</div>
+</div>
+
+<!-- YOUTUBE -->
+<div class="card">
+  <h2>▶️ เพิ่มลิงก์ YouTube</h2>
+  <input id="ytInput" type="text" placeholder="วางลิงก์ YouTube ที่นี่ (youtube.com/... หรือ youtu.be/...)">
+  <div class="row" style="margin-top:8px">
+    <button class="btn violet" onclick="addYouTube()">➕ เพิ่มเข้าคลัง</button>
+  </div>
+</div>
+
+<!-- SLIDESHOW BUILDER -->
+<div class="card">
+  <h2>🖼 สไลด์โชว์</h2>
+  <div class="muted">แตะรูปในคลังด้านล่างเพื่อ “เลือก” (ขอบฟ้า) หลายรูป แล้วกดเริ่ม</div>
+  <div class="row" style="margin-top:10px;align-items:center">
+    <div style="flex:1"><label>เวลา/รูป (วินาที)</label><input id="slideDur" type="number" value="6" min="1" style="max-width:120px"></div>
+    <button class="btn primary" style="flex:none;padding:11px 16px" onclick="startSlideshow()">▶ เริ่มสไลด์โชว์ (<span id="selCount">0</span>)</button>
+    <button class="btn sm" onclick="clearSel()">ล้างที่เลือก</button>
+  </div>
+</div>
+
+<!-- MEDIA LIBRARY -->
+<div class="card">
+  <h2>📁 คลังสื่อ <span class="muted" id="libCount"></span></h2>
+  <div id="lib" class="grid"></div>
+  <div id="libEmpty" class="muted" style="display:none;padding:16px 0;text-align:center">ยังไม่มีสื่อ — อัปโหลดหรือเพิ่มลิงก์ด้านบน</div>
+</div>
+
+<!-- QR / LINKS -->
+<div class="card">
+  <h2>🔗 ลิงก์ &amp; QR</h2>
+  <div class="qrbox">
+    <div class="q"><canvas id="qrDisplay"></canvas><div>เปิดหน้า “จอ”<br>(สแกนที่จอ)</div></div>
+    <div class="q"><canvas id="qrUpload"></canvas><div>อัปรูปจากมือถือ<br>(สแกนแล้วอัปได้เลย)</div></div>
+  </div>
+  <label style="margin-top:12px">ลิงก์หน้าจอ (สำหรับตั้งใน APK/เบราว์เซอร์ที่จอ)</label>
+  <input id="displayLink" readonly onclick="this.select()">
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="config.js"></script>
+<script>
+const CFG = window.SIGNAGE_CONFIG || {};
+const DISPLAY_ID = new URLSearchParams(location.search).get('id') || CFG.DISPLAY_ID || 'screen1';
+const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY);
+document.getElementById('subtitle').textContent = (CFG.APP_NAME||'Signage') + ' · จอะ: ' + DISPLAY_ID;
+
+/* ---------- PIN gate ---------- */
+function checkPin(){
+  const v = document.getElementById('pinInput').value.trim();
+  if (v === String(CFG.ADMIN_PIN)) {
+    sessionStorage.setItem('sig_ok','1');
+    document.getElementById('gate').style.display='none';
+    init();
+  } else {
+    document.getElementById('pinErr').textContent = 'PIN ไม่ถูกต้อง';
+  }
+}
+document.getElementById('pinInput').addEventListener('keydown',e=>{ if(e.key==='Enter') checkPin(); });
+if (sessionStorage.getItem('sig_ok')==='1'){ document.getElementById('gate').style.display='none'; }
+
+/* ---------- toast ---------- */
+let toastT;
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200); }
+
+/* ---------- commands ---------- */
+async function cmd(patch){
+  const { error } = await sb.from('displays').update(patch).eq('id', DISPLAY_ID);
+  if (error) toast('ผิดพลาด: '+error.message); else toast('ส่งคำสั่งแล้ว ✓');
+  loadStatus();
+}
+async function reloadDisplays(){ await cmd({}); toast('สั่งรีเฟรชจอแล้ว'); }
+
+/* ---------- status ---------- */
+async function loadStatus(){
+  const { data } = await sb.from('displays').select('*').eq('id',DISPLAY_ID).maybeSingle();
+  if (!data) return;
+  const online = data.last_seen && (Date.now() - new Date(data.last_seen).getTime() < 70000);
+  document.getElementById('onlineDot').classList.toggle('on', online);
+  document.getElementById('onlineText').textContent = online ? 'จอออนไลน์' : 'จอออฟไลน์';
+  const modeTh = {idle:'ว่าง/นาฬิกา',image:'รูปภาพ',slideshow:'สไลด์โชว์',video:'วิดิโอ',youtube:'YouTube'}[data.mode]||data.mode;
+  document.getElementById('modePill').textContent = 'โหมด: '+modeTh+(data.screen==='off'?' · จอปิด':'');
+}
+
+/* ---------- YouTube ---------- */
+function ytId(url){
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/)|v=)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+async function addYouTube(){
+  const url = document.getElementById('ytInput').value.trim();
+  const id = ytId(url);
+  if (!id){ toast('ลิงก์ YouTube ไม่ถูกต้อง'); return; }
+  const { error } = await sb.from('media').insert({ kind:'youtube', name:'YouTube '+id, url:'https://youtu.be/'+id, storage_path:null });
+  if (error){ toast('ผิดพลาด: '+error.message); return; }
+  document.getElementById('ytInput').value='';
+  toast('เพิ่มลิงก์แล้ว ✓'); loadLibrary();
+}
+
+/* ---------- upload (XHR for progress on big videos) ---------- */
+function uploadWithProgress(path, file, onProg){
+  return new Promise((resolve,reject)=>{
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', CFG.SUPABASE_URL+'/storage/v1/object/media/'+encodeURIComponent(path));
+    xhr.setRequestHeader('Authorization','Bearer '+CFG.SUPABASE_KEY);
+    xhr.setRequestHeader('apikey', CFG.SUPABASE_KEY);
+    xhr.setRequestHeader('x-upsert','true');
+    if (file.type) xhr.setRequestHeader('Content-Type', file.type);
+    xhr.upload.onprogress = e=>{ if(e.lengthComputable && onProg) onProg(e.loaded/e.total); };
+    xhr.onload = ()=> (xhr.status>=200 && xhr.status<300) ? resolve() : reject(new Error('HTTP '+xhr.status+' '+xhr.responseText));
+    xhr.onerror = ()=> reject(new Error('network error'));
+    xhr.send(file);
+  });
+}
+document.getElementById('fileInput').addEventListener('change', async (e)=>{
+  const files = [...e.target.files];
+  if (!files.length) return;
+  const wrap=document.getElementById('progWrap'), bar=document.getElementById('progBar');
+  wrap.style.display='block';
+  for (let i=0;i<files.length;i++){
+    const file = files[i];
+    const kind = file.type.startsWith('video') ? 'video' : 'image';
+    const safe = file.name.replace(/[^\w.\-]+/g,'_');
+    const path = Date.now()+'_'+i+'_'+safe;
+    try{
+      await uploadWithProgress(path, file, p=>{ bar.style.width=Math.round(((i+p)/files.length)*100)+'%'; });
+      const publicUrl = CFG.SUPABASE_URL+'/storage/v1/object/public/media/'+encodeURIComponent(path);
+      await sb.from('media').insert({ kind, name:file.name, url:publicUrl, storage_path:path });
+    }catch(err){ toast('อัปโหลดล้มเหลว: '+file.name); console.error(err); }
+  }
+  bar.style.width='100%';
+  setTimeout(()=>{ wrap.style.display='none'; bar.style.width='0'; },600);
+  e.target.value='';
+  toast('อัปโหลดเสร็จ ✓'); loadLibrary();
+});
+
+/* ---------- library ---------- */
+let selected = new Set();
+let mediaCache = [];
+async function loadLibrary(){
+  const { data, error } = await sb.from('media').select('*').order('created_at',{ascending:false});
+  if (error){ toast('โหลดคลังไม่ได้'); return; }
+  mediaCache = data||[];
+  const lib=document.getElementById('lib'); lib.innerHTML='';
+  document.getElementById('libEmpty').style.display = mediaCache.length? 'none':'block';
+  document.getElementById('libCount').textContent = mediaCache.length? '('+mediaCache.length+')':'';
+  mediaCache.forEach(m=>{
+    const tile=document.createElement('div'); tile.className='tile';
+    let thumbHtml='';
+    if (m.kind==='image'){ thumbHtml=`<div class="thumb" style="background-image:url('${m.url}')"><span class="badge">รูป</span></div>`; }
+    else if (m.kind==='video'){ thumbHtml=`<div class="thumb">🎬<span class="badge">วิดิโอ</span></div>`; }
+    else if (m.kind==='youtube'){ const id=(m.url.match(/[\w-]{11}$/)||[])[0]; thumbHtml=`<div class="thumb" style="background-image:url('https://img.youtube.com/vi/${id}/mqdefault.jpg')"><span class="badge">YouTube</span></div>`; }
+    tile.innerHTML = thumbHtml +
+      `<div class="meta">${m.name||m.kind}</div>
+       <div class="acts">
+         <button class="btn sm primary" data-play="${m.id}">ฉาย</button>
+         <button class="btn sm red" data-del="${m.id}">🗑</button>
+       </div>`;
+    if (m.kind==='image'){
+      const th = tile.querySelector('.thumb');
+      th.style.cursor='pointer';
+      if (selected.has(m.url)) tile.classList.add('sel');
+      th.addEventListener('click', ()=>{
+        if (selected.has(m.url)) selected.delete(m.url); else selected.add(m.url);
+        tile.classList.toggle('sel'); updateSelCount();
+      });
+    }
+    lib.appendChild(tile);
+  });
+  lib.querySelectorAll('[data-play]').forEach(b=> b.onclick=()=>playMedia(b.dataset.play));
+  lib.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>delMedia(b.dataset.del));
+  updateSelCount();
+}
+function updateSelCount(){ document.getElementById('selCount').textContent=selected.size; }
+function clearSel(){ selected.clear(); loadLibrary(); }
+
+async function playMedia(id){
+  const m = mediaCache.find(x=>x.id===id); if(!m) return;
+  if (m.kind==='image')   await cmd({mode:'image', content:{url:m.url}, screen:'on'});
+  if (m.kind==='video')   await cmd({mode:'video', content:{url:m.url, loop:true, muted:false}, screen:'on'});
+  if (m.kind==='youtube'){ const vid=(m.url.match(/[\w-]{11}$/)||[])[0]; await cmd({mode:'youtube', content:{videoId:vid, mute:1, loop:true}, screen:'on'}); }
+  toast('กำลังฉาย: '+(m.name||m.kind));
+}
+async function delMedia(id){
+  const m = mediaCache.find(x=>x.id===id); if(!m) return;
+  if (!confirm('ล฻ "'+(m.name||m.kind)+'" ?')) return;
+  if (m.storage_path) await sb.storage.from('media').remove([m.storage_path]);
+  await sb.from('media').delete().eq('id',id);
+  selected.delete(m.url);
+  toast('ลบแล้ว'); loadLibrary();
+}
+async function startSlideshow(){
+  const urls = mediaCache.filter(m=>selected.has(m.url)).map(m=>m.url);
+  if (urls.length<1){ toast('เลือกรูปอย่างน้อย 1 รูปก่อน'); return; }
+  const dur = Math.max(1, parseInt(document.getElementById('slideDur').value)||6)*1000;
+  await cmd({mode:'slideshow', content:{slides:urls, duration:dur, cover:false}, screen:'on'});
+  toast('เริ่มสไลด์โชว์ '+urls.length+' รูป');
+}
+
+/* ---------- QR + links ---------- */
+function setupLinks(){
+  const base = location.origin + location.pathname.replace(/admin\.html$/,'');
+  const dLink = base+'display.html?id='+encodeURIComponent(DISPLAY_ID);
+  const uLink = base+'upload.html';
+  document.getElementById('displayLink').value = dLink;
+  if (window.QRCode){
+    QRCode.toCanvas(document.getElementById('qrDisplay'), dLink, {width:120,margin:1});
+    QRCode.toCanvas(document.getElementById('qrUpload'),  uLink, {width:120,margin:1});
+  }
+}
+
+/* ---------- init ---------- */
+function init(){
+  setupLinks();
+  loadStatus();
+  loadLibrary();
+  setInterval(loadStatus, 15000);
+  sb.channel('adm-media').on('postgres_changes',{event:'*',schema:'public',table:'media'},loadLibrary).subscribe();
+  sb.channel('adm-disp').on('postgres_changes',{event:'*',schema:'public',table:'displays',filter:`id=eq.${DISPLAY_ID}`},loadStatus).subscribe();
+}
+if (sessionStorage.getItem('sig_ok')==='1') init();
+</script>
+</body>
+</html>
