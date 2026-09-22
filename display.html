@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Display</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; background:#000; overflow:hidden; cursor:none; }
+  #stage { position:fixed; inset:0; background:#000; }
+
+  /* image layers for cross-fade */
+  .layer {
+    position:absolute; inset:0;
+    background-position:center; background-repeat:no-repeat; background-size:contain;
+    opacity:0; transition:opacity .8s ease;
+  }
+  .layer.show { opacity:1; }
+  .layer.cover { background-size:cover; }
+
+  video#vid {
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:contain; background:#000; display:none;
+  }
+  iframe#yt {
+    position:absolute; inset:0; width:100%; height:100%; border:0; display:none;
+  }
+
+  /* idle / offline screens */
+  #idle {
+    position:absolute; inset:0; display:none;
+    align-items:center; justify-content:center; flex-direction:column;
+    color:#2a2a2a; font-family:system-ui,'Segoe UI',sans-serif;
+  }
+  #idle.show { display:flex; }
+  #clock { font-size:9vw; font-weight:300; letter-spacing:.05em; color:#333; }
+  #idle .sub { margin-top:1vh; font-size:2.2vw; color:#222; }
+
+  /* blackout when screen=off */
+  #blackout {
+    position:absolute; inset:0; background:#000; opacity:0;
+    transition:opacity .6s ease; pointer-events:none;
+  }
+  #blackout.on { opacity:1; }
+
+  /* tap-to-start for autoplay fallback */
+  #tap {
+    position:absolute; inset:0; display:none;
+    align-items:center; justify-content:center; flex-direction:column;
+    background:rgba(0,0,0,.85); color:#fff; z-index:50;
+    font-family:system-ui,sans-serif; cursor:pointer;
+  }
+  #tap.show { display:flex; }
+  #tap .icon { font-size:14vw; }
+  #tap .txt  { margin-top:2vh; font-size:3vw; }
+
+  /* connection dot (tiny, corner) */
+  #dot {
+    position:absolute; left:8px; bottom:8px; width:8px; height:8px; border-radius:50%;
+    background:#c0392b; z-index:60; opacity:.35; transition:background .3s;
+  }
+  #dot.ok { background:#27ae60; }
+
+  /* setup hint if config missing */
+  #err {
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    color:#e74c3c; font-family:system-ui,sans-serif; font-size:3vw; text-align:center; padding:5vw;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="layer" id="A"></div>
+  <div class="layer" id="B"></div>
+  <video id="vid" playsinline webkit-playsinline></video>
+  <iframe id="yt" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+
+  <div id="idle">
+    <div id="clock">--:--</div>
+    <div class="sub" id="idleName"></div>
+  </div>
+
+  <div id="blackout"></div>
+  <div id="tap"><div class="icon">▶</div><div class="txt">แตะเพื่อเริ่มเล่น</div></div>
+  <div id="err"></div>
+  <div id="dot"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+(function(){
+  "use strict";
+  const CFG = window.SIGNAGE_CONFIG || {};
+  const qs = new URLSearchParams(location.search);
+  const DISPLAY_ID = qs.get('id') || CFG.DISPLAY_ID || 'screen1';
+  const DISPLAY_NAME = qs.get('name') || '';
+
+  const $ = s => document.querySelector(s);
+  const errBox = $('#err');
+  if (!CFG.SUPABASE_URL || !CFG.SUPABASE_KEY) {
+    errBox.style.display='flex';
+    errBox.textContent = 'ยังไม่ได้ตั้งค่า Supabase ใน config.js';
+    return;
+  }
+
+  const sb = supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY, {
+    realtime: { params: { eventsPerSecond: 5 } }
+  });
+
+  // ---------- elements ----------
+  const layers = [$('#A'), $('#B')];
+  let activeLayer = 0;
+  const vid = $('#vid');
+  const yt  = $('#yt');
+  const idle = $('#idle');
+  const blackout = $('#blackout');
+  const tap = $('#tap');
+  const dot = $('#dot');
+  $('#idleName').textContent = DISPLAY_NAME;
+
+  // ---------- state signature to avoid redundant re-render ----------
+  let lastSig = '';
+
+  // ---------- media helpers ----------
+  function hideAll(){
+    vid.pause(); vid.removeAttribute('src'); vid.load(); vid.style.display='none';
+    yt.style.display='none'; yt.src='about:blank';
+    idle.classList.remove('show');
+    tap.classList.remove('show');
+  }
+
+  function showImage(url, cover){
+    hideAll();
+    const next = 1 - activeLayer;
+    const el = layers[next];
+    el.classList.toggle('cover', !!cover);
+    const img = new Image();
+    img.onload = () => {
+      el.style.backgroundImage = `url("${url}")`;
+      el.classList.add('show');
+      layers[activeLayer].classList.remove('show');
+      activeLayer = next;
+    };
+    img.onerror = () => { el.style.backgroundImage=`url("${url}")`; el.classList.add('show'); layers[activeLayer].classList.remove('show'); activeLayer=next; };
+    img.src = url;
+  }
+
+  // ---------- slideshow ----------
+  let slideTimer = null, slideIdx = 0, slides = [], slideDur = 6000, slideCover=false;
+  function stopSlideshow(){ if (slideTimer){ clearTimeout(slideTimer); slideTimer=null; } }
+  function runSlideshow(){
+    stopSlideshow();
+    if (!slides.length) return;
+    slideIdx = slideIdx % slides.length;
+    showImage(slides[slideIdx], slideCover);
+    slideTimer = setTimeout(()=>{ slideIdx++; runSlideshow(); }, slideDur);
+  }
+
+  // ---------- video ----------
+  function showVideo(url, loop, muted){
+    hideAll();
+    layers.forEach(l=>l.classList.remove('show'));
+    vid.style.display='block';
+    vid.loop = loop !== false;
+    vid.muted = !!muted;
+    vid.src = url;
+    const tryPlay = () => vid.play().then(()=>{ tap.classList.remove('show'); })
+      .catch(()=>{
+        if (!vid.muted){ vid.muted = true; vid.play().then(()=>{ showTapHint(); }).catch(showTapHint); }
+        else { showTapHint(); }
+      });
+    tryPlay();
+  }
+  function showTapHint(){ tap.classList.add('show'); }
+  tap.addEventListener('click', ()=>{
+    tap.classList.remove('show');
+    vid.muted = false;
+    vid.play().catch(()=>{ vid.muted=true; vid.play(); });
+  });
+
+  // ---------- youtube ----------
+  function showYouTube(videoId, loop, mute){
+    hideAll();
+    layers.forEach(l=>l.classList.remove('show'));
+    const m = (mute===0||mute===false) ? 0 : 1;
+    let src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=${m}&controls=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3`;
+    if (loop !== false) src += `&loop=1&playlist=${videoId}`;
+    yt.src = src;
+    yt.style.display='block';
+  }
+
+  // ---------- idle ----------
+  function showIdle(){
+    hideAll();
+    layers.forEach(l=>l.classList.remove('show'));
+    idle.classList.add('show');
+  }
+  function tickClock(){
+    const d = new Date();
+    const h = String(d.getHours()).padStart(2,'0');
+    const m = String(d.getMinutes()).padStart(2,'0');
+    const c = document.getElementById('clock'); if (c) c.textContent = `${h}:${m}`;
+  }
+  setInterval(tickClock, 1000); tickClock();
+
+  function render(row){
+    if (!row) { showIdle(); return; }
+    blackout.classList.toggle('on', row.screen === 'off');
+    const content = row.content || {};
+    const sig = JSON.stringify([row.mode, content]);
+    if (sig === lastSig) return;
+    lastSig = sig;
+    stopSlideshow();
+    switch(row.mode){
+      case 'image': showImage(content.url, content.cover); break;
+      case 'slideshow':
+        slides = (content.slides || []).map(s => typeof s==='string'? s : s.url);
+        slideDur = content.duration || 6000;
+        slideCover = !!content.cover;
+        slideIdx = 0;
+        runSlideshow();
+        break;
+      case 'video': showVideo(content.url, content.loop, content.muted); break;
+      case 'youtube': showYouTube(content.videoId, content.loop, content.mute); break;
+      default: showIdle();
+    }
+  }
+
+  async function loadOnce(){
+    const { data, error } = await sb.from('displays').select('*').eq('id', DISPLAY_ID).maybeSingle();
+    if (error){ dot.classList.remove('ok'); return; }
+    if (!data){
+      await sb.from('displays').insert({ id: DISPLAY_ID, name: DISPLAY_NAME || DISPLAY_ID });
+      showIdle();
+      return;
+    }
+    dot.classList.add('ok');
+    render(data);
+  }
+
+  function subscribe(){
+    sb.channel('disp-'+DISPLAY_ID)
+      .on('postgres_changes',
+        { event:'*', schema:'public', table:'displays', filter:`id=eq.${DISPLAY_ID}` },
+        payload => { dot.classList.add('ok'); render(payload.new); })
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED') dot.classList.add('ok');
+        else dot.classList.remove('ok');
+      });
+  }
+
+  setInterval(loadOnce, 20000);
+
+  async function heartbeat(){
+    try { await sb.from('displays').update({ last_seen: new Date().toISOString() }).eq('id', DISPLAY_ID); }
+    catch(e){}
+  }
+  setInterval(heartbeat, 30000);
+
+  let wakeLock = null;
+  async function requestWake(){
+    try {
+      if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); }
+    } catch(e){}
+  }
+  document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='visible') requestWake(); });
+
+  requestWake();
+  loadOnce();
+  subscribe();
+  heartbeat();
+})();
+</script>
+</body>
+</html>
